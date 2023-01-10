@@ -1,4 +1,3 @@
-_grammar-test
 acme
 algol60
 angelscript
@@ -6,6 +5,7 @@ antlr/antlr2
 antlr/antlr3
 antlr/antlr4
 apex
+aql
 asn/asn_3gpp
 cobol85
 cool
@@ -14,8 +14,11 @@ creole
 csharp
 css3
 cto
+dart2
+databank
 fortran77
 gdscript
+glsl
 golang
 haskell
 html
@@ -35,8 +38,10 @@ kirikiri-tjs
 kotlin/kotlin
 kotlin/kotlin-formal
 kquery
+logo/logo
 logo/ucb-logo
 lpc
+lucene
 modula2pim4
 pascal
 peoplecode
@@ -47,6 +52,7 @@ powerbuilder
 prov-n
 python/python
 python/python3
+python/python3alt
 r
 racket-bsl
 racket-isl
@@ -59,6 +65,7 @@ smtlibv2
 sparql
 sql/hive/v2
 sql/hive/v3
+sql/mariadb
 sql/mysql
 sql/plsql
 sql/postgresql
@@ -100,6 +107,7 @@ wat
 wavefront
 webidl
 wkt
+wren
 wln
 xml
 xpath/xpath1

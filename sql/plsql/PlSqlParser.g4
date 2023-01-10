@@ -30,7 +30,7 @@ options {
 }
 
 sql_script
-    : ((unit_statement | sql_plus_command) SEMICOLON?)* EOF
+    : ((sql_plus_command | unit_statement) SEMICOLON?)* EOF
     ;
 
 unit_statement
@@ -40,16 +40,20 @@ unit_statement
     | alter_function
     | alter_package
     | alter_procedure
+    | alter_rollback_segment
     | alter_sequence
     | alter_session
+    | alter_synonym
     | alter_trigger
     | alter_type
     | alter_table
     | alter_tablespace
+    | alter_role
     | alter_index
     | alter_library
     | alter_materialized_view
     | alter_materialized_view_log
+    | alter_materialized_zonemap
     | alter_user
     | alter_view
 
@@ -64,7 +68,9 @@ unit_statement
     | create_package_body
 
     | create_index
+    | create_library
     | create_table
+    | create_role
     | create_tablespace
     | create_cluster
     | create_context
@@ -72,6 +78,8 @@ unit_statement
     | create_directory
     | create_materialized_view
     | create_materialized_view_log
+    | create_materialized_zonemap
+    | create_rollback_segment
     | create_user
 
     | create_sequence
@@ -79,15 +87,24 @@ unit_statement
     | create_type
     | create_synonym
 
+    | drop_cluster
     | drop_function
+    | drop_library
     | drop_package
     | drop_procedure
+    | drop_materialized_view
+    | drop_materialized_zonemap
+    | drop_rollback_segment
+    | drop_role
+    | drop_synonym
     | drop_sequence
     | drop_trigger
     | drop_type
     | data_manipulation_language_statements
     | truncate_table
+    | truncate_cluster
     | drop_table
+    | drop_user
     | drop_view
     | drop_index
 
@@ -95,6 +112,7 @@ unit_statement
 
     | comment_on_column
     | comment_on_table
+    | comment_on_materialized
 
     | anonymous_block
 
@@ -220,6 +238,25 @@ create_procedure_body
     : CREATE (OR REPLACE)? PROCEDURE procedure_name ('(' parameter (',' parameter)* ')')?
       invoker_rights_clause? (IS | AS)
       (DECLARE? seq_of_declare_specs? body | call_spec | EXTERNAL) ';'
+    ;
+
+// Rollback Segment DDLs
+
+//https://docs.oracle.com/cd/E11882_01/server.112/e41084/statements_2011.htm#SQLRF00816
+alter_rollback_segment
+    : ALTER ROLLBACK SEGMENT rollback_segment_name (ONLINE | OFFLINE | storage_clause | SHRINK (TO size_clause)?)
+    ;
+
+drop_rollback_segment
+    : DROP ROLLBACK SEGMENT rollback_segment_name
+    ;
+
+drop_role
+    : DROP ROLE role_name ';'
+    ;
+
+create_rollback_segment
+    : CREATE PUBLIC? ROLLBACK SEGMENT rollback_segment_name (TABLESPACE tablespace | storage_clause)*
     ;
 
 // Trigger DDLs
@@ -579,7 +616,7 @@ sequence_start_clause
 create_index
     : CREATE (UNIQUE | BITMAP)? INDEX index_name
        ON (cluster_index_clause | table_index_clause | bitmap_join_index_clause)
-       UNUSABLE?
+       (USABLE | UNUSABLE)?
        ';'
     ;
 
@@ -630,7 +667,7 @@ local_xmlindex_clause
     ;
 
 global_partitioned_index
-    : GLOBAL PARTITION BY (RANGE '(' column_name (',' column_name)* ')' '(' index_partitioning_clause ')'
+    : GLOBAL PARTITION BY (RANGE '(' column_name (',' column_name)* ')' '(' index_partitioning_clause (',' index_partitioning_clause)* ')'
                           | HASH '(' column_name (',' column_name)* ')'
                                             (individual_hash_partitions
                                             | hash_partitions_by_quantity
@@ -882,6 +919,10 @@ alter_user
       | user_object_name (',' user_object_name)* proxy_clause ';'
     ;
 
+drop_user
+    : DROP USER user_object_name CASCADE?
+    ;
+
 alter_identified_by
     : identified_by (REPLACE id_expression)?
     ;
@@ -991,6 +1032,16 @@ validation_clauses
         online_or_offline? into_clause?
     ;
 
+compute_clauses
+    : COMPUTE SYSTEM? STATISTICS for_clause?
+    ;
+for_clause
+     : FOR ( TABLE for_clause*
+           | ALL (INDEXED? COLUMNS (SIZE UNSIGNED_INTEGER)? for_clause* | LOCAL? INDEXES)
+           | COLUMNS (SIZE UNSIGNED_INTEGER)? (column_name SIZE UNSIGNED_INTEGER)+ for_clause*
+           )
+    ;
+
 online_or_offline
     : OFFLINE
     | ONLINE
@@ -1003,10 +1054,12 @@ into_clause1
 //Making assumption on partition ad subpartition key value clauses
 partition_key_value
     : literal
+    | TIMESTAMP quoted_string
     ;
 
 subpartition_key_value
     : literal
+    | TIMESTAMP quoted_string
     ;
 
 //https://docs.oracle.com/cd/E11882_01/server.112/e41084/statements_4006.htm#SQLRF01106
@@ -1266,6 +1319,23 @@ alter_library
      ';'
     ;
 
+drop_library
+    : DROP LIBRARY library_name
+    ;
+
+create_library
+    : CREATE (OR REPLACE)? (EDITIONABLE | NONEDITIONABLE)? LIBRARY plsql_library_source
+    ;
+
+plsql_library_source
+    : library_name (IS | AS) quoted_string (IN directory_name)?
+        (AGENT quoted_string)? (CREDENTIAL credential_name)?
+    ;
+
+credential_name
+    : (id_expression '.')? id_expression
+    ;
+
 library_editionable
     : {self.isVersion12()}? (EDITIONABLE | NONEDITIONABLE)
     ;
@@ -1309,9 +1379,21 @@ alter_view_editionable
     ;
 
 create_view
-    : CREATE (OR REPLACE)? (OR? FORCE)? EDITIONABLE? EDITIONING? VIEW
+    : CREATE (OR REPLACE)? no_force_clause? editioning_clause? VIEW
       tableview_name view_options?
       AS select_only_statement subquery_restriction_clause?
+    ;
+
+
+no_force_clause
+    : (NO | OR)? FORCE
+    | NOFORCE
+    ;
+
+editioning_clause
+    : EDITIONING
+    | EDITIONABLE EDITIONING?
+    | NONEDITIONABLE
     ;
 
 view_options
@@ -1360,7 +1442,7 @@ out_of_line_constraint
           ( UNIQUE '(' column_name (',' column_name)* ')'
           | PRIMARY KEY '(' column_name (',' column_name)* ')'
           | foreign_key_clause
-          | CHECK '(' expression ')'
+          | CHECK '(' condition ')'
           )
        )
       constraint_state?
@@ -1680,6 +1762,41 @@ mv_log_purge_clause
          )
     ;
 
+create_materialized_zonemap
+    : CREATE MATERIALIZED ZONEMAP zonemap_name (LEFT_PAREN column_list RIGHT_PAREN)? zonemap_attributes? zonemap_refresh_clause?
+        ((ENABLE | DISABLE) PRUNING)? (create_zonemap_on_table | create_zonemap_as_subquery)
+    ;
+
+alter_materialized_zonemap
+    : ALTER MATERIALIZED ZONEMAP zonemap_name
+        ( zonemap_attributes | zonemap_refresh_clause| (ENABLE | DISABLE) PRUNING | COMPILE | REBUILD | UNUSABLE
+        )
+    ;
+
+drop_materialized_zonemap
+    : DROP MATERIALIZED ZONEMAP zonemap_name
+    ;
+
+zonemap_refresh_clause
+    : REFRESH (FAST | COMPILE | FORCE)? (ON (DEMAND | COMMIT | LOAD | DATA MOVEMENT | LOAD DATA MOVEMENT))?
+    ;
+
+zonemap_attributes
+    : (PCTFREE numeric | PCTUSED numeric | SCALE numeric | TABLESPACE tablespace | (CACHE | NOCACHE))+
+    ;
+
+zonemap_name
+    : identifier ('.' id_expression)?
+    ;
+
+create_zonemap_on_table
+    : ON tableview_name LEFT_PAREN column_list RIGHT_PAREN
+    ;
+
+create_zonemap_as_subquery
+    : AS subquery
+    ;
+
 create_materialized_view
     : CREATE MATERIALIZED VIEW tableview_name
       (OF type_name )?
@@ -1713,6 +1830,11 @@ create_mv_refresh
       )
     ;
 
+drop_materialized_view
+    : DROP MATERIALIZED VIEW tableview_name (PRESERVE TABLE)?
+        ';'
+    ;
+
 create_context
     : CREATE (OR REPLACE)? CONTEXT oracle_namespace USING (schema_object_name '.')? package_name
            (INITIALIZED (EXTERNALLY | GLOBALLY)
@@ -1737,6 +1859,10 @@ create_cluster
           parallel_clause? (ROWDEPENDENCIES | NOROWDEPENDENCIES)?
           (CACHE | NOCACHE)?
           ';'
+    ;
+
+create_role
+    : CREATE ROLE role_name role_identified_clause? container_clause?
     ;
 
 create_table
@@ -1817,10 +1943,10 @@ relational_table
     ;
 
 relational_property
-    : (column_definition
-        | virtual_column_definition
-        | out_of_line_constraint
+    : ( out_of_line_constraint
         | out_of_line_ref_constraint
+        | column_definition
+        | virtual_column_definition
         | supplemental_logging_props
         )
     ;
@@ -1980,7 +2106,7 @@ range_values_clause
     ;
 
 list_values_clause
-    : VALUES '(' (literal (',' literal)* | DEFAULT) ')'
+    : VALUES '(' (literal (',' literal)* | TIMESTAMP literal (',' TIMESTAMP literal)* | DEFAULT) ')'
     ;
 
 table_partition_description
@@ -2035,7 +2161,10 @@ physical_attributes_clause
     : (PCTFREE pctfree=UNSIGNED_INTEGER
       | PCTUSED pctused=UNSIGNED_INTEGER
       | INITRANS inittrans=UNSIGNED_INTEGER
+      | MAXTRANS maxtrans=UNSIGNED_INTEGER
+      | COMPUTE STATISTICS
       | storage_clause
+      | compute_clauses
       )+
     ;
 
@@ -2051,6 +2180,7 @@ storage_clause
          | OPTIMAL (size_clause | NULL_ )
          | BUFFER_POOL (KEEP | RECYCLE | DEFAULT)
          | FLASH_CACHE (KEEP | NONE | DEFAULT)
+         | CELL_FLASH_CACHE (KEEP | NONE | DEFAULT)
          | ENCRYPT
          )+
        ')'
@@ -2063,6 +2193,7 @@ deferred_segment_creation
 segment_attributes_clause
     : ( physical_attributes_clause
       | TABLESPACE tablespace_name=id_expression
+      | table_compression
       | logging_clause
       )+
     ;
@@ -2159,14 +2290,26 @@ allow_or_disallow
 
 // Synonym DDL Clauses
 
+alter_synonym
+    : ALTER PUBLIC? SYNONYM (schema_name '.')? synonym_name (EDITIONABLE | NONEDITIONABLE | COMPILE)
+    ;
+
 create_synonym
     // Synonym's schema cannot be specified for public synonyms
     : CREATE (OR REPLACE)? PUBLIC SYNONYM synonym_name FOR (schema_name PERIOD)? schema_object_name (AT_SIGN link_name)?
     | CREATE (OR REPLACE)? SYNONYM (schema_name PERIOD)? synonym_name FOR (schema_name PERIOD)? schema_object_name (AT_SIGN link_name)?
     ;
 
+drop_synonym
+    : DROP PUBLIC? SYNONYM (schema_name '.')? synonym_name FORCE?
+    ;
+
 comment_on_table
     : COMMENT ON TABLE tableview_name IS quoted_string
+    ;
+
+comment_on_materialized
+    : COMMENT ON MATERIALIZED VIEW tableview_name IS quoted_string
     ;
 
 alter_cluster
@@ -2179,6 +2322,14 @@ alter_cluster
         )+
         parallel_clause?
         ';'
+    ;
+
+drop_cluster
+    : DROP CLUSTER cluster_name (INCLUDING TABLES (CASCADE CONSTRAINTS)?)?
+    ;
+
+truncate_cluster
+    : TRUNCATE CLUSTER cluster_name ((DROP | REUSE) STORAGE)?
     ;
 
 cache_or_nocache
@@ -2482,13 +2633,26 @@ filename
     : CHAR_STRING
     ;
 
+alter_role
+    : ALTER ROLE role_name role_identified_clause container_clause?
+    ;
+
+role_identified_clause
+    : NOT IDENTIFIED
+    | IDENTIFIED ( BY identifier
+                 | USING identifier ('.' id_expression)?
+                 | EXTERNALLY
+                 | GLOBALLY
+                 )
+    ;
+
 alter_table
     : ALTER TABLE tableview_name
       (
       | alter_table_properties
       | constraint_clauses
       | column_clauses
-//TODO      | alter_table_partitioning
+      | alter_table_partitioning
 //TODO      | alter_external_table
       | move_table_clause
       )
@@ -2503,6 +2667,77 @@ alter_table_properties
     | READ ONLY
     | READ WRITE
     | REKEY CHAR_STRING
+    ;
+
+alter_table_partitioning
+    : add_table_partition
+    | drop_table_partition
+    | merge_table_partition
+    | modify_table_partition
+    | split_table_partition
+    | truncate_table_partition
+    | exchange_table_partition
+    | coalesce_table_partition
+    | alter_interval_partition
+    ;
+
+
+add_table_partition
+    : ADD ( range_partition_desc
+          | list_partition_desc
+          | PARTITION partition_name? (TABLESPACE tablespace)? key_compression? UNUSABLE?
+      )
+    ;
+
+drop_table_partition
+    : DROP (partition_extended_names | subpartition_extended_names) (update_index_clauses parallel_clause?)?
+    ;
+
+merge_table_partition
+    : MERGE PARTITION partition_name AND partition_name INTO PARTITION partition_name
+    ;
+
+modify_table_partition
+    : MODIFY PARTITION partition_name ((ADD | DROP) list_values_clause)? (ADD range_subpartition_desc)? (REBUILD? UNUSABLE LOCAL INDEXES)?
+    ;
+
+split_table_partition
+    : SPLIT PARTITION partition_name INTO '('
+         (range_partition_desc (',' range_partition_desc)*
+         | list_partition_desc (',' list_partition_desc)* )
+     ')'
+    ;
+
+truncate_table_partition
+    : TRUNCATE (partition_extended_names | subpartition_extended_names)
+            ((DROP ALL? | REUSE)? STORAGE)? CASCADE? (update_index_clauses parallel_clause?)?
+    ;
+
+exchange_table_partition
+    : EXCHANGE PARTITION partition_name WITH TABLE tableview_name
+            ((INCLUDING | EXCLUDING) INDEXES)?
+            ((WITH | WITHOUT) VALIDATION)?
+    ;
+
+coalesce_table_partition
+    : COALESCE PARTITION parallel_clause? (allow_or_disallow CLUSTERING)?
+    ;
+
+alter_interval_partition
+    : SET INTERVAL '(' (constant | expression)? ')'
+    ;
+
+
+partition_extended_names
+    : (PARTITION | PARTITIONS) ( partition_name
+                               | '(' partition_name (',' partition_name)* ')'
+                               | FOR '('? partition_key_value (',' partition_key_value)* ')'? )
+    ;
+
+subpartition_extended_names
+    : (SUBPARTITION | SUBPARTITIONS) ( partition_name (UPDATE INDEXES)?
+                                     | '(' partition_name (',' partition_name)* ')'
+                                     | FOR '('? subpartition_key_value (',' subpartition_key_value)* ')'? )
     ;
 
 alter_table_properties_1
@@ -2543,6 +2778,31 @@ add_overflow_clause
     : ADD OVERFLOW segment_attributes_clause? ('(' PARTITION segment_attributes_clause? (',' PARTITION segment_attributes_clause?)*  ')' )?
     ;
 
+
+update_index_clauses
+    : update_global_index_clause
+    | update_all_indexes_clause
+    ;
+
+update_global_index_clause
+    : (UPDATE | INVALIDATE) GLOBAL INDEXES
+    ;
+
+update_all_indexes_clause
+    : UPDATE INDEXES ('(' update_all_indexes_index_clause ')')?
+    ;
+
+update_all_indexes_index_clause
+    : index_name '(' (update_index_partition | update_index_subpartition) ')' (',' update_all_indexes_clause)*
+    ;
+
+update_index_partition
+    : index_partition_description index_subpartition_clause? (',' update_index_partition)*
+    ;
+
+update_index_subpartition
+    : SUBPARTITION subpartition_name? (TABLESPACE tablespace)? (',' update_index_subpartition)*
+    ;
 
 enable_disable_clause
     : (ENABLE | DISABLE) (VALIDATE | NOVALIDATE)?
@@ -2628,7 +2888,8 @@ new_column_name
     ;
 
 add_modify_drop_column_clauses
-    : (add_column_clause
+    : (constraint_clauses
+      |add_column_clause
       |modify_column_clauses
       |drop_column_clause
       )+
@@ -2687,16 +2948,17 @@ lob_segname
 
 lob_item
     : regular_id
+    | quoted_string
     ;
 
 lob_storage_parameters
-    :  TABLESPACE tablespace | (lob_parameters storage_clause? )
+    :  TABLESPACE tablespace_name=id_expression | (lob_parameters storage_clause? )
     |  storage_clause
     ;
 
 lob_storage_clause
-    : LOB ( '(' lob_item (',' lob_item)* ')' STORE AS ( (SECUREFILE|BASICFILE) | '(' lob_storage_parameters ')' )+
-          | '(' lob_item ')' STORE AS ( (SECUREFILE | BASICFILE) | lob_segname | '(' lob_storage_parameters ')' )+
+    : LOB ( '(' lob_item (',' lob_item)* ')' STORE AS ( (SECUREFILE|BASICFILE) | '(' lob_storage_parameters* ')' )+
+          | '(' lob_item ')' STORE AS ( (SECUREFILE | BASICFILE) | lob_segname | '(' lob_storage_parameters* ')' )+
           )
     ;
 
@@ -2753,7 +3015,7 @@ encryption_spec
     : (USING  CHAR_STRING)? (IDENTIFIED BY REGULAR_ID)? CHAR_STRING? (NO? SALT)?
     ;
 tablespace
-    : regular_id
+    : id_expression
     ;
 
 varray_item
@@ -2820,6 +3082,7 @@ substitutable_column_clause
 
 partition_name
     : regular_id
+    | DELIMITED_ID
     ;
 
 supplemental_logging_props
@@ -3721,6 +3984,12 @@ seed_part
 
 condition
     : expression
+    | json_condition
+    ;
+
+json_condition
+    : column_name IS NOT? JSON (FORMAT JSON)? (STRICT|LAX)? ((WITH|WITHOUT) UNIQUE KEYS)?
+    | JSON_EQUAL '(' expressions ')'
     ;
 
 expressions
@@ -4104,8 +4373,8 @@ sql_plus_command
 
 whenever_command
     : WHENEVER (SQLERROR | OSERROR)
-         ( EXIT (SUCCESS | FAILURE | WARNING | variable_name) (COMMIT | ROLLBACK)
-         | CONTINUE (COMMIT | ROLLBACK | NONE))
+         ( EXIT (SUCCESS | FAILURE | WARNING | variable_name | numeric) (COMMIT | ROLLBACK)?
+         | CONTINUE (COMMIT | ROLLBACK | NONE)?)
     ;
 
 set_command
@@ -4129,7 +4398,11 @@ table_alias
     ;
 
 where_clause
-    : WHERE (CURRENT OF cursor_name | expression)
+    : WHERE (CURRENT OF cursor_name | expression | quantitative_where_stmt)
+    ;
+
+quantitative_where_stmt
+    : expression relational_operator (SOME | ALL | ANY) '(' expression (',' expression)* ')'
     ;
 
 into_clause
@@ -4693,6 +4966,7 @@ regular_id
     | YMINTERVAL_UNCONSTRAINED
     | REGR_
     | VAR_
+    | VALUE
     | COVAR_
     ;
 

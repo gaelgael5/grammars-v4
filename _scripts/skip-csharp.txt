@@ -1,6 +1,4 @@
-_grammar-test
 apex
-asm/masm
 asn/asn_3gpp
 clif
 cpp
@@ -16,7 +14,6 @@ logo/ucb-logo
 lpc
 objc
 pgn
-php
 pike
 powerbuilder
 python/python

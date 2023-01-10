@@ -6,7 +6,7 @@ import (
     "os"
     "io"
     "time"
-    "github.com/antlr/antlr4/runtime/Go/antlr"
+    "github.com/antlr/antlr4/runtime/Go/antlr/v4"
     "example.com/myparser/<package_name>"
 <if (case_insensitive_type)>
     "example.com/myparser/antlr_resource"
@@ -22,7 +22,7 @@ func NewCustomErrorListener() *CustomErrorListener {
 
 func (l *CustomErrorListener) SyntaxError(recognizer antlr.Recognizer, offendingSymbol interface{}, line, column int, msg string, e antlr.RecognitionException) {
     l.errors += 1
-    antlr.ConsoleErrorListenerINSTANCE.SyntaxError(recognizer, offendingSymbol, line, column, msg, e)
+    fmt.Printf("line %d:%d %s", line, column, msg)
 }
 
 func (l *CustomErrorListener) ReportAmbiguity(recognizer antlr.Parser, dfa *antlr.DFA, startIndex, stopIndex int, exact bool, ambigAlts *antlr.BitSet, configs antlr.ATNConfigSet) {
@@ -110,16 +110,16 @@ func main() {
     start := time.Now()
     var tree = parser.<cap_start_symbol>()
     elapsed := time.Since(start)
-    fmt.Printf("Time: %.3f s", elapsed.Seconds())
-    fmt.Println()
+    fmt.Fprintf(os.Stderr, "Time: %.3f s", elapsed.Seconds())
+    fmt.Fprintln(os.Stderr)
     if parserErrors.errors > 0 || lexerErrors.errors > 0 {
-        fmt.Println("Parse failed.");
+        fmt.Fprintln(os.Stderr, "Parse failed.");
     } else {
-        fmt.Println("Parse succeeded.")
-    }
-    if show_tree {
-        ss := tree.ToStringTree(parser.RuleNames, parser)
-        fmt.Println(ss)
+        fmt.Fprintln(os.Stderr, "Parse succeeded.")
+        if show_tree {
+            ss := tree.ToStringTree(parser.RuleNames, parser)
+            fmt.Println(ss)
+        }
     }
     if parserErrors.errors > 0 || lexerErrors.errors > 0 {
         os.Exit(1)

@@ -1,8 +1,9 @@
-_grammar-test
 apex
 asn/asn_3gpp
 cql3
 csharp
+dart2
+databank
 fortran77
 gdscript
 golang
@@ -25,7 +26,7 @@ php
 powerbuilder
 python/python
 python/python2
-python/python3
+python/python3alt
 python/python3-py
 python/python3-ts
 python/python3-without-actions
@@ -36,6 +37,7 @@ rexx
 rust
 sql/hive/v2
 sql/hive/v3
+sql/mariadb
 sql/mysql
 sql/plsql
 sql/postgresql
